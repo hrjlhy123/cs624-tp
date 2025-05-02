@@ -43,7 +43,9 @@ export default function App() {
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
       <Text>{content.title}</Text>
       <Text>{content.content}</Text>
-      <Pressable onPress={handlePress}>{content.button}</Pressable>
+      <Pressable onPress={handlePress}>
+        <Text>{content.button}</Text>
+      </Pressable>
     </View>
   );
 }
