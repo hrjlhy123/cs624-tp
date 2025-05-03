@@ -1,7 +1,7 @@
 import { Text, View, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 
-export default function App() {
+export default function Setting() {
   const router = useRouter();
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>

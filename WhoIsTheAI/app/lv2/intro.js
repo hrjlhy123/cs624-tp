@@ -1,5 +1,3 @@
-// I hate typescript so I use javascript in this page to avoid type Stage = 'policy' | 'rules' | 'loading';
-
 import { Text, View, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -17,7 +15,7 @@ const contents = {
   },
 };
 
-export default function App() {
+export default function Intro() {
   const [stage, setStage] = useState(`policy`);
   const router = useRouter();
 
