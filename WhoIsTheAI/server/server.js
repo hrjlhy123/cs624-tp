@@ -15,6 +15,7 @@ const io = new Server(server, {
 
 let players = [];
 const readyMap = new Map();
+const answers = new Map();
 let countdownTimer = null;
 
 const checkAllReady = () => {
@@ -77,7 +78,7 @@ io.on(`connection`, (socket) => {
     answers.set(socket.id, message);
     console.log(`${playerObj.name} answered: ${message}`);
 
-    if (answer.size == players.length) {
+    if (answers.size == players.length) {
       console.log(`✅ All players answered:`);
       for (const [sid, msg] of answers.entries()) {
         const p = readyMap.get(sid);
@@ -93,7 +94,7 @@ io.on(`connection`, (socket) => {
       players = players.filter((p) => p.name !== player.name);
     }
     readyMap.delete(socket.id);
-    answers.delete(socket.id);
+    answers?answers.delete(socket.id):"";
     io.emit(
       "players",
       players.map((p) => p.name)

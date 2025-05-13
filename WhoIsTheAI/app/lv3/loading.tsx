@@ -10,7 +10,7 @@ export default function Loading() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    socketRef.current = io(`https://e7e54f1f7904.ngrok.app`);
+    socketRef.current = io(`https://wita-api.ngrok.io`);
 
     socketRef.current.on(`players`, (data) => {
       setPlayers(data);
@@ -43,7 +43,6 @@ export default function Loading() {
       <Pressable
         onPress={() => {
           socketRef.current?.emit(`ready`);
-          router.push("/");
         }}
       >
         <Text>Ready?</Text>

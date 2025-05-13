@@ -8,7 +8,7 @@ export default function Chatroom() {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    socketRef.current = io("https://e7e54f1f7904.ngrok.app");
+    socketRef.current = io("https://wita-api.ngrok.io");
     // return () => socketRef.current?.disconnect();
   }, []);
 
