@@ -35,3 +35,4 @@ export async function GPT(model, base64Image, message = null) {
     console.log(`Failed to process GPT: ${error}`);
   }
 }
+
