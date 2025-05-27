@@ -1,23 +1,25 @@
 import { GPT } from "./AI.js";
 
-let players = [];
 const readyMap = new Map();
+const voteMap = new Map();
 const answers = new Map();
 let countdownTimer = null;
+let isGeneratingQuestion = false;
+const AI_name = `AI`;
 
-const checkAllReady = () => players.length > 0 && players.every((p) => p.ready);
+const checkAllReady = () =>
+  readyMap.size > 0 && Array.from(readyMap.values()).every((p) => p.ready);
 
-const startCountdown = (io) => {
+const startCountdown = (io, seconds = 3) => {
   if (!countdownTimer) {
-    let secondsLeft = 3;
-    io.emit("countdown", secondsLeft);
+    io.emit("countdown", seconds);
     countdownTimer = setInterval(() => {
-      secondsLeft--;
-      io.emit("countdown", secondsLeft);
-      if (secondsLeft <= 0) {
+      seconds--;
+      io.emit("countdown", seconds);
+      if (seconds <= 0) {
         clearInterval(countdownTimer);
         countdownTimer = null;
-        io.emit("startGame");
+        io.emit("countdown complete");
       }
     }, 1000);
   }
@@ -33,64 +35,109 @@ const cancelCountdown = (io) => {
 
 export function setupSocket(io) {
   io.on("connection", (socket) => {
-    const playerName = `Player${players.length + 1}`;
-    const playerObj = { name: playerName, ready: false };
-
-    players.push(playerObj);
-    readyMap.set(socket.id, playerObj);
+    readyMap.set(socket.id, { ready: false });
     cancelCountdown(io);
 
-    io.emit("players", players.map((p) => p.name));
+      io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
 
     socket.on("ready", () => {
-      playerObj.ready = true;
-      io.emit("players", players.map((p) => p.name));
-      if (checkAllReady()) startCountdown(io);
+      const player = readyMap.get(socket.id);
+      if (player) {
+        player.ready = true;
+        io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+        if (checkAllReady()) startCountdown(io);
+      }
     });
 
-    socket.on("question", async (message) => {
-      console.log(`question`)
+    socket.on("question", async () => {
+      console.log(`question`);
+      const questionText = "What is the capital of France?";
+      io.emit(`question`, questionText);
+      startCountdown(io, 60);
 
-      const gpt = await GPT(`gpt-4o`, null, message)
+      if (!isGeneratingQuestion) {
+        isGeneratingQuestion = true;
+        try {
+          const gpt = await GPT(`gpt-4o`, null, questionText);
 
-      const gptReply = gpt?.message?.content || ''
+          const gptReply = gpt?.message?.content || "";
 
-      const fullMessage = {
-        name: `AI`,
-        text: gptReply,
+          const fullMessage = {
+            name: AI_name,
+            text: gptReply,
+          };
+          setTimeout(() => {
+            io.emit(`answer`, fullMessage);
+          }, Math.floor(Math.random() * 26) * 1000);
+        } catch (err) {
+          console.error("❌ GPT error:", err);
+        }
       }
-
-      io.emit(`answer`, fullMessage)
-    })
+    });
 
     socket.on("answer", (message) => {
-      const player = readyMap.get(socket.id);
-      console.log(`socket.id:`, socket.id, `\nplayer:`, player, `\nplayer name:`, player?.name, `\nmessage:`, message)
-      const fullMessage = { name: player?.name || "Unknown", text: message };
       answers.set(socket.id, message);
-      io.emit("answer", fullMessage);
+      io.emit("answer", {
+        name: socket.id,
+        text: message,
+      });
 
-      if (answers.size === players.length) {
+      if (answers.size === readyMap.size) {
         console.log("✅ All players answered:");
         for (const [sid, msg] of answers.entries()) {
-          const p = readyMap.get(sid);
-          console.log(`- ${p?.name || sid}: ${msg}`);
+          console.log(`- ${sid}: ${msg}`);
         }
         answers.clear();
       }
     });
 
     socket.on("disconnect", () => {
-      const player = readyMap.get(socket.id);
-      if (!player?.ready) {
-        players = players.filter((p) => p.name !== player?.name);
-      }
       readyMap.delete(socket.id);
       answers.delete(socket.id);
 
-      io.emit("players", players.map((p) => p.name));
+      io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+
       cancelCountdown(io);
       if (checkAllReady()) startCountdown(io);
+    });
+
+    socket.on("vote", (message) => {
+      // temporary
+      isGeneratingQuestion = false;
+
+      const voterId = socket.id;
+      const targetId = message.vote;
+
+      console.log(socket.id, "vote for:", message.vote);
+
+      voteMap.set(voterId, targetId);
+
+      if (voteMap.size === readyMap.size) {
+        const voteCounts = new Map();
+
+        for (const vote of voteMap.values()) {
+          voteCounts.set(vote, (voteCounts.get(vote) || 0) + 1);
+        }
+
+        let maxVotes = 0;
+        let topVoted = [];
+
+        for (const [playerId, count] of voteCounts.entries()) {
+          if (count > maxVotes) {
+            maxVotes = count;
+            topVoted = [playerId];
+          } else if (count === maxVotes) {
+            topVoted.push(playerId);
+          }
+        }
+
+        io.emit("vote result", {
+          voteCounts: Object.fromEntries(voteCounts),
+          topVoted,
+        });
+
+        voteMap.clear();
+      }
     });
   });
 }

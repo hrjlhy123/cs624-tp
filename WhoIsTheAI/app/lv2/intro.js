@@ -1,6 +1,6 @@
-import { Text, View, Pressable, ScrollView, StyleSheet, ImageBackground } from "react-native";
 import { useRouter } from "expo-router";
 import { useState } from "react";
+import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 const contents = {
   policy: {
