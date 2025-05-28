@@ -8,11 +8,14 @@ export default function Chatroom() {
   const { players } = useLocalSearchParams();
   const [playerList, setPlayerList] = useState<string[]>([]);
   const [question, setQuestion] = useState(``);
-  const [chatList, setChatList] = useState<{ name: string; text: string }[]>([]);
+  const [chatList, setChatList] = useState<{ name: string; text: string }[]>(
+    []
+  );
   const [message, setMessage] = useState(``);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
   const [phase, setPhase] = useState<`qa` | `vote`>(`qa`);
+  const [shuffledList, setShuffledList] = useState<string[]>([]);
 
   const handleChat = (data: { name: string; text: string }) => {
     setChatList((prev) => [...prev, data]);
@@ -30,13 +33,12 @@ export default function Chatroom() {
         const socket = getSocket();
         if (!socket) return;
 
-        socket.emit("question");
-
         return (
           <>
+            {/* ❶ Question & live answers */}
             <Text>Question:</Text>
             <Text>{question}</Text>
-
+            <Text>Answer:</Text>
             {chatList.map((m, i) => (
               <Text key={i}>
                 {m.name}: {m.text}
@@ -51,19 +53,17 @@ export default function Chatroom() {
               onSubmitEditing={() => {
                 socket.emit("answer", message.trim());
                 setMessage(``);
-                setChatList([]);
               }}
             />
           </>
         );
       case `vote`:
         const self = getSocket()!;
-        console.log("playerList:", playerList);
+        // console.log("playerList:", playerList);
         return (
           <>
             <Text>Vote:</Text>
-            {playerList
-              .sort(() => Math.random() - 0.5)
+            {shuffledList
               .filter((p) => p !== self.id)
               .map((player) => (
                 <Pressable
@@ -85,6 +85,8 @@ export default function Chatroom() {
     const socket = getSocket();
     if (!socket) return;
 
+    socket.emit("question");
+
     // @ts-ignore
     console.log("players:", JSON.parse(players));
     setPlayerList(JSON.parse(players as string));
@@ -96,11 +98,22 @@ export default function Chatroom() {
     socket.on("countdown complete", (result) => {
       console.log(`result:`, result);
       if (result === "qa") {
+        setChatList([]);
+        socket.emit("question");
         setPhase("qa");
+        setHasVoted(false);
       } else if (result === "vote") {
+        socket.emit("vote");
         setPhase("vote");
+        setShuffledList(
+          JSON.parse(players as string).sort(() => Math.random() - 0.5)
+        );
+        console.log("voting time:", players);
       } else {
+        setChatList([]);
+        socket.emit("question");
         setPhase("qa");
+        setHasVoted(false);
       }
     });
     socket.on("vote result", (result) => {
@@ -125,9 +138,6 @@ export default function Chatroom() {
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
       <Text>&lt;ChatRoom&gt;</Text>
-      {/* ❶ Question & live answers */}
-
-      <Text>Answer:</Text>
       {countdown !== null && (
         <Text style={{ fontSize: 30, color: "red" }}>{countdown}</Text>
       )}

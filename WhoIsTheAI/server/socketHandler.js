@@ -7,6 +7,30 @@ let countdownTimer = null;
 let isGeneratingQuestion = false;
 const AI_name = `AI`;
 
+let questions = [
+  "What is the capital of France?",
+  "What color is the sky?",
+  "How many continents are there?",
+  "Name a mammal that can fly.",
+  "What is the boiling point of water in Celsius?",
+  "Who wrote 'Hamlet'?",
+  "What is the largest ocean?",
+  "Which planet is known as the Red Planet?",
+  "What is 7 multiplied by 8?",
+  "What is the chemical symbol for gold?",
+];
+
+const usedQuestions = new Set();
+
+const getNextQuestion = () => {
+  const available = questions.filter((q) => !usedQuestions.has(q));
+  if (available.length === 0) return null;
+  const randomIndex = Math.floor(Math.random() * available.length);
+  const next = available[randomIndex];
+  usedQuestions.add(next);
+  return next;
+};
+
 const checkAllReady = () =>
   readyMap.size > 0 && Array.from(readyMap.values()).every((p) => p.ready);
 
@@ -50,14 +74,15 @@ export function setupSocket(io) {
     });
 
     socket.on("question", async () => {
-      const questionText = "What is the capital of France?";
-      console.log(`question:`, questionText);
-      io.emit(`question`, questionText);
-      startCountdown(io, 60);
+      console.log("isGeneratingQuestion:", isGeneratingQuestion);
+      let questionText;
 
-      // console.log("isGeneratingQuestion:", isGeneratingQuestion)s
       if (!isGeneratingQuestion) {
         isGeneratingQuestion = true;
+
+        questionText = getNextQuestion();
+        console.log(`🟡 question:`, questionText);
+
         try {
           const gpt = await GPT(`gpt-4o`, null, questionText);
 
@@ -74,6 +99,9 @@ export function setupSocket(io) {
           console.error("❌ GPT error:", err);
         }
       }
+
+      io.emit(`question`, questionText);
+      startCountdown(io, 60);
     });
 
     socket.on("answer", (message) => {
@@ -105,42 +133,45 @@ export function setupSocket(io) {
     });
 
     socket.on("vote", (message) => {
-      // temporary
-      isGeneratingQuestion = false;
+      if (!message) {
+        startCountdown(io, 60)
+      } else {
+        isGeneratingQuestion = false;
 
-      const voterId = socket.id;
-      const targetId = message.vote;
+        const voterId = socket.id;
+        const targetId = message.vote;
 
-      console.log(socket.id, "vote for:", message.vote);
+        console.log(socket.id, "vote for:", message.vote);
 
-      voteMap.set(voterId, targetId);
+        voteMap.set(voterId, targetId);
 
-      if (voteMap.size === readyMap.size) {
-        const voteCounts = new Map();
+        if (voteMap.size === readyMap.size) {
+          const voteCounts = new Map();
 
-        for (const vote of voteMap.values()) {
-          voteCounts.set(vote, (voteCounts.get(vote) || 0) + 1);
-        }
-
-        let maxVotes = 0;
-        let topVoted = [];
-
-        for (const [playerId, count] of voteCounts.entries()) {
-          if (count > maxVotes) {
-            maxVotes = count;
-            topVoted = [playerId];
-          } else if (count === maxVotes) {
-            topVoted.push(playerId);
+          for (const vote of voteMap.values()) {
+            voteCounts.set(vote, (voteCounts.get(vote) || 0) + 1);
           }
-        }
 
-        io.emit("vote result", {
-          voteCounts: Object.fromEntries(voteCounts),
-          topVoted,
-        });
-        cancelCountdown(io)
-        startCountdown(io, 10, "qa");
-        voteMap.clear();
+          let maxVotes = 0;
+          let topVoted = [];
+
+          for (const [playerId, count] of voteCounts.entries()) {
+            if (count > maxVotes) {
+              maxVotes = count;
+              topVoted = [playerId];
+            } else if (count === maxVotes) {
+              topVoted.push(playerId);
+            }
+          }
+
+          io.emit("vote result", {
+            voteCounts: Object.fromEntries(voteCounts),
+            topVoted,
+          });
+          cancelCountdown(io);
+          startCountdown(io, 10, "qa");
+          voteMap.clear();
+        }
       }
     });
   });
