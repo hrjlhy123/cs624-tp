@@ -10,7 +10,7 @@ const AI_name = `AI`;
 const checkAllReady = () =>
   readyMap.size > 0 && Array.from(readyMap.values()).every((p) => p.ready);
 
-const startCountdown = (io, seconds = 3) => {
+const startCountdown = (io, seconds = 3, phase = NaN) => {
   if (!countdownTimer) {
     io.emit("countdown", seconds);
     countdownTimer = setInterval(() => {
@@ -19,7 +19,7 @@ const startCountdown = (io, seconds = 3) => {
       if (seconds <= 0) {
         clearInterval(countdownTimer);
         countdownTimer = null;
-        io.emit("countdown complete");
+        io.emit("countdown complete", phase);
       }
     }, 1000);
   }
@@ -38,7 +38,7 @@ export function setupSocket(io) {
     readyMap.set(socket.id, { ready: false });
     cancelCountdown(io);
 
-      io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+    io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
 
     socket.on("ready", () => {
       const player = readyMap.get(socket.id);
@@ -50,11 +50,12 @@ export function setupSocket(io) {
     });
 
     socket.on("question", async () => {
-      console.log(`question`);
       const questionText = "What is the capital of France?";
+      console.log(`question:`, questionText);
       io.emit(`question`, questionText);
       startCountdown(io, 60);
 
+      // console.log("isGeneratingQuestion:", isGeneratingQuestion)s
       if (!isGeneratingQuestion) {
         isGeneratingQuestion = true;
         try {
@@ -87,6 +88,8 @@ export function setupSocket(io) {
         for (const [sid, msg] of answers.entries()) {
           console.log(`- ${sid}: ${msg}`);
         }
+        cancelCountdown(io);
+        startCountdown(io, undefined, "vote");
         answers.clear();
       }
     });
@@ -135,7 +138,8 @@ export function setupSocket(io) {
           voteCounts: Object.fromEntries(voteCounts),
           topVoted,
         });
-
+        cancelCountdown(io)
+        startCountdown(io, 10, "qa");
         voteMap.clear();
       }
     });
