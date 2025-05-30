@@ -3,11 +3,13 @@ import { GPT } from "./AI.js";
 const readyMap = new Map();
 const voteMap = new Map();
 const answers = new Map();
+const nameToSocketId = new Map();
 let countdownTimer = null;
 let isGeneratingQuestion = false;
+let answerCount = 0;
 const AI_name = `AI`;
 
-let questions = [
+const questions = [
   "What is the capital of France?",
   "What color is the sky?",
   "How many continents are there?",
@@ -20,7 +22,48 @@ let questions = [
   "What is the chemical symbol for gold?",
 ];
 
+const anonymousNamesPool = [
+  "Mysterious Fox",
+  "Shadow Walker",
+  "Silent Whisper",
+  "Blue Phantom",
+  "Crimson Owl",
+  "Nameless One",
+  "Coded Ghost",
+  "Sneaky Cat",
+  "Blurred Face",
+  "Hidden Star",
+  "Unknown Hero",
+  "Ghost Protocol",
+  "Invisible Ink",
+  "Secret Agent",
+  "Blackout",
+  "Echo Voice",
+  "Anonymous",
+  "Player X",
+  "Masked Raven",
+  "Unseen Blade",
+  "???",
+  "Nobody",
+];
+
+const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
+const generateAnonymousNames = (count) =>
+  shuffle([...anonymousNamesPool]).slice(0, count);
+
 const usedQuestions = new Set();
+const eliminatedSet = new Set();
+
+const getNormalRandom = (mean = 15, stdDev = 5, min = 0, max = 30) => {
+  let u = 0,
+    v = 0;
+  while (u === 0) u = Math.random(); // 避免 0
+  while (v === 0) v = Math.random();
+  const num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+
+  const sample = Math.round(num * stdDev + mean);
+  return Math.max(min, Math.min(max, sample));
+};
 
 const getNextQuestion = () => {
   const available = questions.filter((q) => !usedQuestions.has(q));
@@ -57,23 +100,39 @@ const cancelCountdown = (io) => {
   }
 };
 
+const checkAllAnswered = (io) => {
+  if (answers.size === readyMap.size + 1) {
+    console.log("✅ All players answered:");
+    for (const [sid, msg] of answers.entries()) {
+      console.log(`- ${sid}: ${msg}`);
+    }
+    cancelCountdown(io);
+    startCountdown(io, undefined, "vote");
+    answers.clear();
+  }
+};
+
 export function setupSocket(io) {
   io.on("connection", (socket) => {
     readyMap.set(socket.id, { ready: false });
     cancelCountdown(io);
 
-    io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+    let playerCount = readyMap.size;
+    let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+    io.emit("players", obfuscatedNames);
 
     socket.on("ready", () => {
       const player = readyMap.get(socket.id);
       if (player) {
         player.ready = true;
-        io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+        let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+        io.emit("players", obfuscatedNames);
         if (checkAllReady()) startCountdown(io);
       }
     });
 
     socket.on("question", async () => {
+      answerCount = 0;
       console.log("isGeneratingQuestion:", isGeneratingQuestion);
       let questionText;
 
@@ -84,17 +143,42 @@ export function setupSocket(io) {
         console.log(`🟡 question:`, questionText);
 
         try {
-          const gpt = await GPT(`gpt-4o`, null, questionText);
+          const questionPrompt = `You're a player in a social deception game. Other players are humans who usually give lazy, short, or careless answers — sometimes right, sometimes wrong.
+
+          Answer like a real player would:
+
+          - Quick answer
+          - Less respect, emotional sometimes
+          - Less punctuation or filler or emoji
+          - Better one word since humans are lazy
+          ${
+            Math.random() < 0.3
+              ? `- IMPORTANT: Sometimes (not always), answer wrong, vague, or nonsense (e.g.'asdasd', 'qwerty', ...)`
+              : ``
+          }
+
+          Question: ${questionText}
+          Answer:`;
+
+          const gpt = await GPT(`gpt-4o`, null, questionPrompt);
 
           const gptReply = gpt?.message?.content || "";
 
-          const fullMessage = {
-            name: AI_name,
-            text: gptReply,
-          };
+          const delay = getNormalRandom(15, 5, 0, 30) * 1000;
+
           setTimeout(() => {
-            io.emit(`answer`, fullMessage);
-          }, Math.floor(Math.random() * 26) * 1000);
+            answerCount++;
+            const playerName = `player${answerCount}`;
+            io.emit(`answer`, {
+              name: playerName,
+              text: gptReply,
+            });
+            answers.set(AI_name, gptReply);
+            nameToSocketId.set(playerName, socket.id);
+            setTimeout(() => {
+              checkAllAnswered(io);
+            }, Math.random() * 200);
+          }, delay);
         } catch (err) {
           console.error("❌ GPT error:", err);
         }
@@ -105,28 +189,24 @@ export function setupSocket(io) {
     });
 
     socket.on("answer", (message) => {
+      answerCount++;
+      const playerName = `player${answerCount}`;
       answers.set(socket.id, message);
+      nameToSocketId.set(playerName, socket.id);
       io.emit("answer", {
-        name: socket.id,
+        name: playerName,
         text: message,
       });
 
-      if (answers.size === readyMap.size) {
-        console.log("✅ All players answered:");
-        for (const [sid, msg] of answers.entries()) {
-          console.log(`- ${sid}: ${msg}`);
-        }
-        cancelCountdown(io);
-        startCountdown(io, undefined, "vote");
-        answers.clear();
-      }
+      checkAllAnswered(io);
     });
 
     socket.on("disconnect", () => {
       readyMap.delete(socket.id);
       answers.delete(socket.id);
 
-      io.emit("players", [AI_name, ...Array.from(readyMap.keys())]);
+      let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+      io.emit("players", obfuscatedNames);
 
       cancelCountdown(io);
       if (checkAllReady()) startCountdown(io);
@@ -134,12 +214,13 @@ export function setupSocket(io) {
 
     socket.on("vote", (message) => {
       if (!message) {
-        startCountdown(io, 60)
+        startCountdown(io, 60);
       } else {
         isGeneratingQuestion = false;
 
         const voterId = socket.id;
-        const targetId = message.vote;
+        const targetName = message.vote;
+        const targetId = nameToSocketId.get(targetName);
 
         console.log(socket.id, "vote for:", message.vote);
 
@@ -168,8 +249,40 @@ export function setupSocket(io) {
             voteCounts: Object.fromEntries(voteCounts),
             topVoted,
           });
-          cancelCountdown(io);
-          startCountdown(io, 10, "qa");
+
+          if (topVoted.length === 1) {
+            const eliminatedId = topVoted[0];
+            eliminatedSet.add(eliminatedId);
+            const eliminatedSocket = io.sockets.sockets.get(eliminatedId);
+            eliminatedSocket?.emit("eliminated");
+          } else {
+            for (const eliminatedId of topVoted) {
+              eliminatedSet.add(eliminatedId);
+              const eliminatedSocket = io.sockets.sockets.get(eliminatedId);
+              eliminatedSocket?.emit("eliminated");
+            }
+          }
+
+          const alivePlayers = Array.from(
+            readyMap.keys().filter((id) => !eliminatedSet.has(id))
+          );
+          const AIAlive = !eliminatedSet.has(AI_name);
+
+          if (!AIAlive) {
+            io.emit(`gg`, { result: `win` });
+          } else if (
+            AIAlive &&
+            (alivePlayers.length === 0 || alivePlayers.length === 1)
+          ) {
+            io.emit(`gg`, { result: `lose` });
+            if (alivePlayers.length === 1) {
+              console.log(`Only one player left, skipping vote in next round`);
+            }
+          } else {
+            cancelCountdown(io);
+            startCountdown(io, 10, "qa");
+          }
+
           voteMap.clear();
         }
       }

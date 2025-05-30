@@ -6,7 +6,7 @@ import { getSocket } from "../../utils/socketRef";
 export default function Chatroom() {
   const router = useRouter();
   const { players } = useLocalSearchParams();
-  const [playerList, setPlayerList] = useState<string[]>([]);
+  // const [playerList, setPlayerList] = useState<string[]>([]);
   const [question, setQuestion] = useState(``);
   const [chatList, setChatList] = useState<{ name: string; text: string }[]>(
     []
@@ -15,14 +15,15 @@ export default function Chatroom() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
   const [phase, setPhase] = useState<`qa` | `vote`>(`qa`);
-  const [shuffledList, setShuffledList] = useState<string[]>([]);
+  // const [shuffledList, setShuffledList] = useState<string[]>([]);
+  const [isEliminated, setIsEliminated] = useState(false);
 
   const handleChat = (data: { name: string; text: string }) => {
     setChatList((prev) => [...prev, data]);
   };
 
   const vote = (who: string, target: string) => {
-    if (hasVoted) return;
+    if (hasVoted || isEliminated) return;
     getSocket()?.emit(`vote`, { who: who, vote: target });
     setHasVoted(true);
   };
@@ -47,12 +48,17 @@ export default function Chatroom() {
             <TextInput
               value={message}
               onChangeText={setMessage}
-              placeholder="Type your answer…"
+              placeholder={
+                isEliminated ? "You are eliminated." : "Type your answer…"
+              }
+              editable={!isEliminated}
               autoFocus
               returnKeyType="done"
               onSubmitEditing={() => {
-                socket.emit("answer", message.trim());
-                setMessage(``);
+                if (!isEliminated) {
+                  socket.emit("answer", message.trim());
+                  setMessage(``);
+                }
               }}
             />
           </>
@@ -63,15 +69,15 @@ export default function Chatroom() {
         return (
           <>
             <Text>Vote:</Text>
-            {shuffledList
-              .filter((p) => p !== self.id)
+            {chatList
+              // .filter((p) => p !== self.id)
               .map((player) => (
                 <Pressable
-                  key={player}
-                  onPress={() => vote(self.id as string, player)}
-                  disabled={hasVoted}
+                  key={player.name}
+                  onPress={() => vote(self.id as string, player.name)}
+                  disabled={hasVoted || isEliminated}
                 >
-                  <Text>{player}</Text>
+                  <Text>{player.name}</Text>
                 </Pressable>
               ))}
           </>
@@ -89,7 +95,7 @@ export default function Chatroom() {
 
     // @ts-ignore
     console.log("players:", JSON.parse(players));
-    setPlayerList(JSON.parse(players as string));
+    // setPlayerList(JSON.parse(players as string));
     setPhase("qa");
 
     socket.on("question", setQuestion);
@@ -105,10 +111,6 @@ export default function Chatroom() {
       } else if (result === "vote") {
         socket.emit("vote");
         setPhase("vote");
-        setShuffledList(
-          JSON.parse(players as string).sort(() => Math.random() - 0.5)
-        );
-        console.log("voting time:", players);
       } else {
         setChatList([]);
         socket.emit("question");
@@ -124,6 +126,17 @@ export default function Chatroom() {
       // countdown...
       // then vote result
     });
+    socket.on("eliminated", () => {
+      console.log("🔴 You have been eliminated.");
+      setIsEliminated(true);
+    });
+
+    socket.on(`gg`, (result) => {
+      router.push({
+        pathname: `/lv3/ending`,
+        params: { result }
+      })
+    })
 
     return () => {
       socket.off("question", setQuestion);
@@ -131,8 +144,16 @@ export default function Chatroom() {
       socket.off("countdown", setCountdown);
       socket.off("countdown complete");
       socket.off("vote result");
+      socket.off("eliminated");
+      socket.off(`gg`)
     };
   }, []);
+
+  // useEffect(() => {
+  //   if (phase === "vote" && playerList.length > 0) {
+  //     setShuffledList([...playerList].sort(() => Math.random() - 0.5));
+  //   }
+  // }, [phase, playerList]);
 
   //   const router = useRouter();
   return (
