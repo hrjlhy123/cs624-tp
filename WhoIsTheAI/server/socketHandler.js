@@ -1,4 +1,30 @@
+import fs from "fs";
+import path from "path";
 import { GPT } from "./AI.js";
+
+const statsFilePath = path.resolve("./stats.json");
+
+let stats = {
+  totalGames: 0,
+  totalGameTime: 0,
+  humanWins: 0,
+  aiWins: 0,
+};
+
+let gameStartTime = null;
+
+if (fs.existsSync(statsFilePath)) {
+  try {
+    const data = fs.readFileSync(statsFilePath);
+    stats = JSON.parse(data);
+  } catch (e) {
+    console.error("❌ Failed to read stats file", e);
+  }
+}
+
+function saveStats() {
+  fs.writeFileSync(statsFilePath, JSON.stringify(stats, null, 2));
+}
 
 const readyMap = new Map();
 const voteMap = new Map();
@@ -101,13 +127,19 @@ const cancelCountdown = (io) => {
 };
 
 const checkAllAnswered = (io) => {
-  if (answers.size === readyMap.size + 1) {
+  const activePlayersCount = Array.from(readyMap.keys()).filter(
+    (id) => !eliminatedSet.has(id)
+  ).length;
+
+  const expectedAnswers = activePlayersCount + 1; // +1 for AI
+
+  if (answers.size === expectedAnswers) {
     console.log("✅ All players answered:");
     for (const [sid, msg] of answers.entries()) {
       console.log(`- ${sid}: ${msg}`);
     }
     cancelCountdown(io);
-    startCountdown(io, undefined, "vote");
+    startCountdown(io, 3, "vote");
     answers.clear();
   }
 };
@@ -127,13 +159,16 @@ export function setupSocket(io) {
         player.ready = true;
         let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
         io.emit("players", obfuscatedNames);
-        if (checkAllReady()) startCountdown(io);
+        if (checkAllReady()) {
+          gameStartTime = Date.now();
+          startCountdown(io);
+        }
       }
     });
 
     socket.on("question", async () => {
       answerCount = 0;
-      console.log("isGeneratingQuestion:", isGeneratingQuestion);
+      // console.log("isGeneratingQuestion:", isGeneratingQuestion);
       let questionText;
 
       if (!isGeneratingQuestion) {
@@ -185,7 +220,7 @@ export function setupSocket(io) {
       }
 
       io.emit(`question`, questionText);
-      startCountdown(io, 60);
+      startCountdown(io, 60, "vote");
     });
 
     socket.on("answer", (message) => {
@@ -210,6 +245,7 @@ export function setupSocket(io) {
 
       cancelCountdown(io);
       if (checkAllReady()) startCountdown(io);
+      isGeneratingQuestion = false;
     });
 
     socket.on("vote", (message) => {
@@ -269,16 +305,65 @@ export function setupSocket(io) {
           const AIAlive = !eliminatedSet.has(AI_name);
 
           if (!AIAlive) {
-            io.emit(`gg`, { result: `win` });
-          } else if (
-            AIAlive &&
-            (alivePlayers.length === 0 || alivePlayers.length === 1)
-          ) {
-            io.emit(`gg`, { result: `lose` });
-            if (alivePlayers.length === 1) {
-              console.log(`Only one player left, skipping vote in next round`);
-            }
+            console.log(`player win!`);
+            cancelCountdown(io);
+            startCountdown(io, 10);
+            setTimeout(() => {
+              io.emit(`gg`, { result: `win` });
+              const gameDuration = Math.round(
+                (Date.now() - gameStartTime) / 1000
+              ); // 秒
+              stats.totalGames++;
+              stats.totalGameTime += gameDuration;
+              stats.humanWins++;
+              saveStats();
+              const aiWinRate =
+                stats.totalGames > 0
+                  ? (stats.aiWins / stats.totalGames).toFixed(2)
+                  : "0.00";
+              console.log("📊 Stats:", {
+                totalGames: stats.totalGames,
+                totalGameTime: stats.totalGameTime + "s",
+                humanWins: stats.humanWins,
+                aiWins: stats.aiWins,
+                aiWinRate: `${aiWinRate * 100}%`,
+              });
+            }, 10000);
+          } else if (AIAlive && alivePlayers.length <= 1) {
+            console.log(`player lose!`);
+            // if (alivePlayers.length === 1) {
+            //   console.log(`Only one player left, skipping vote in next round`);
+            // }
+            cancelCountdown(io);
+            startCountdown(io, 10);
+            setTimeout(() => {
+              io.emit(`gg`, { result: `lose` });
+              const gameDuration = Math.round(
+                (Date.now() - gameStartTime) / 1000
+              );
+              stats.totalGames++;
+              stats.totalGameTime += gameDuration;
+              stats.aiWins++;
+              saveStats();
+              const aiWinRate =
+                stats.totalGames > 0
+                  ? (stats.aiWins / stats.totalGames).toFixed(2)
+                  : "0.00";
+              console.log("📊 Stats:", {
+                totalGames: stats.totalGames,
+                totalGameTime: stats.totalGameTime + "s",
+                humanWins: stats.humanWins,
+                aiWins: stats.aiWins,
+                aiWinRate: `${aiWinRate * 100}%`,
+              });
+            }, 10000);
           } else {
+            console.log(
+              `Game continue: AIAlive:`,
+              AIAlive,
+              `aliverPlayers.length:`,
+              alivePlayers.length
+            );
             cancelCountdown(io);
             startCountdown(io, 10, "qa");
           }

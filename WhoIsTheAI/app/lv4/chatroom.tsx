@@ -13,6 +13,7 @@ export default function Chatroom() {
   );
   const [message, setMessage] = useState(``);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [hasAnswered, setHasAnswered] = useState(false);
   const [hasVoted, setHasVoted] = useState(false);
   const [phase, setPhase] = useState<`qa` | `vote`>(`qa`);
   // const [shuffledList, setShuffledList] = useState<string[]>([]);
@@ -55,9 +56,10 @@ export default function Chatroom() {
               autoFocus
               returnKeyType="done"
               onSubmitEditing={() => {
-                if (!isEliminated) {
+                if (!isEliminated && !hasAnswered && message.trim()) {
                   socket.emit("answer", message.trim());
                   setMessage(``);
+                  setHasAnswered(true);
                 }
               }}
             />
@@ -104,9 +106,13 @@ export default function Chatroom() {
     socket.on("countdown complete", (result) => {
       console.log(`result:`, result);
       if (result === "qa") {
+        if (!hasAnswered && !isEliminated) {
+          socket.emit("answer", "");
+        }
         setChatList([]);
         socket.emit("question");
         setPhase("qa");
+        setHasAnswered(false);
         setHasVoted(false);
       } else if (result === "vote") {
         socket.emit("vote");
@@ -131,12 +137,12 @@ export default function Chatroom() {
       setIsEliminated(true);
     });
 
-    socket.on(`gg`, (result) => {
+    socket.on(`gg`, (resultObj) => {
       router.push({
         pathname: `/lv3/ending`,
-        params: { result }
-      })
-    })
+        params: { result: resultObj.result },
+      });
+    });
 
     return () => {
       socket.off("question", setQuestion);
@@ -145,7 +151,7 @@ export default function Chatroom() {
       socket.off("countdown complete");
       socket.off("vote result");
       socket.off("eliminated");
-      socket.off(`gg`)
+      socket.off(`gg`);
     };
   }, []);
 
