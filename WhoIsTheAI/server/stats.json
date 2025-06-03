@@ -1,6 +1,6 @@
 {
-  "totalGames": 1,
-  "totalGameTime": 25,
-  "humanWins": 0,
-  "aiWins": 1
+  "totalGames": 5,
+  "totalGameTime": 204,
+  "humanWins": 1,
+  "aiWins": 4
 }

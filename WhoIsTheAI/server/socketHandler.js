@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { GPT } from "./AI.js";
+import { saveGameStats } from "./dbOperation.js";
 
 const statsFilePath = path.resolve("./stats.json");
 
@@ -33,7 +34,7 @@ const nameToSocketId = new Map();
 let countdownTimer = null;
 let isGeneratingQuestion = false;
 let answerCount = 0;
-const AI_name = `AI`;
+const AI_ID = `AI`;
 
 const questions = [
   "What is the capital of France?",
@@ -131,9 +132,7 @@ const checkAllAnswered = (io) => {
     (id) => !eliminatedSet.has(id)
   ).length;
 
-  const expectedAnswers = activePlayersCount + 1; // +1 for AI
-
-  if (answers.size === expectedAnswers) {
+  if (answers.size === activePlayersCount) {
     console.log("✅ All players answered:");
     for (const [sid, msg] of answers.entries()) {
       console.log(`- ${sid}: ${msg}`);
@@ -150,16 +149,17 @@ export function setupSocket(io) {
     cancelCountdown(io);
 
     let playerCount = readyMap.size;
-    let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+    let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
     io.emit("players", obfuscatedNames);
 
     socket.on("ready", () => {
       const player = readyMap.get(socket.id);
       if (player) {
         player.ready = true;
-        let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+        let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
         io.emit("players", obfuscatedNames);
         if (checkAllReady()) {
+          readyMap.set(AI_ID, { ready: true });
           gameStartTime = Date.now();
           startCountdown(io);
         }
@@ -208,8 +208,8 @@ export function setupSocket(io) {
               name: playerName,
               text: gptReply,
             });
-            answers.set(AI_name, gptReply);
-            nameToSocketId.set(playerName, socket.id);
+            answers.set(AI_ID, gptReply);
+            nameToSocketId.set(playerName, AI_ID);
             setTimeout(() => {
               checkAllAnswered(io);
             }, Math.random() * 200);
@@ -240,7 +240,7 @@ export function setupSocket(io) {
       readyMap.delete(socket.id);
       answers.delete(socket.id);
 
-      let obfuscatedNames = [AI_name, ...generateAnonymousNames(playerCount)];
+      let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
       io.emit("players", obfuscatedNames);
 
       cancelCountdown(io);
@@ -258,11 +258,12 @@ export function setupSocket(io) {
         const targetName = message.vote;
         const targetId = nameToSocketId.get(targetName);
 
-        console.log(socket.id, "vote for:", message.vote);
+        console.log(voterId, "vote for:", targetName);
 
         voteMap.set(voterId, targetId);
 
-        if (voteMap.size === readyMap.size) {
+        console.log(`voteMap:`, voteMap, `readyMap:`, readyMap)
+        if (voteMap.size === readyMap.size - 1) { // -1 for AI
           const voteCounts = new Map();
 
           for (const vote of voteMap.values()) {
@@ -302,7 +303,8 @@ export function setupSocket(io) {
           const alivePlayers = Array.from(
             readyMap.keys().filter((id) => !eliminatedSet.has(id))
           );
-          const AIAlive = !eliminatedSet.has(AI_name);
+          const AIAlive = !eliminatedSet.has(AI_ID);
+          console.log("eliminatedSet:", eliminatedSet, "AI_ID:", AI_ID)
 
           if (!AIAlive) {
             console.log(`player win!`);
@@ -312,7 +314,7 @@ export function setupSocket(io) {
               io.emit(`gg`, { result: `win` });
               const gameDuration = Math.round(
                 (Date.now() - gameStartTime) / 1000
-              ); // 秒
+              );
               stats.totalGames++;
               stats.totalGameTime += gameDuration;
               stats.humanWins++;
@@ -327,6 +329,13 @@ export function setupSocket(io) {
                 humanWins: stats.humanWins,
                 aiWins: stats.aiWins,
                 aiWinRate: `${aiWinRate * 100}%`,
+              });
+
+              saveGameStats({
+                totalGames: stats.totalGames,
+                totalGameTime: stats.totalGameTime,
+                humanWins: stats.humanWins,
+                aiWins: stats.aiWins,
               });
             }, 10000);
           } else if (AIAlive && alivePlayers.length <= 1) {
@@ -355,6 +364,13 @@ export function setupSocket(io) {
                 humanWins: stats.humanWins,
                 aiWins: stats.aiWins,
                 aiWinRate: `${aiWinRate * 100}%`,
+              });
+
+              saveGameStats({
+                totalGames: stats.totalGames,
+                totalGameTime: stats.totalGameTime,
+                humanWins: stats.humanWins,
+                aiWins: stats.aiWins,
               });
             }, 10000);
           } else {
