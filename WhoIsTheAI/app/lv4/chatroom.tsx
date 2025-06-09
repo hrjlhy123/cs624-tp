@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getSocket } from "../../utils/socketRef";
 
@@ -13,20 +13,20 @@ export default function Chatroom() {
   );
   const [message, setMessage] = useState(``);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [hasAnswered, setHasAnswered] = useState(false);
-  const [hasVoted, setHasVoted] = useState(false);
   const [phase, setPhase] = useState<`qa` | `vote`>(`qa`);
   // const [shuffledList, setShuffledList] = useState<string[]>([]);
-  const [isEliminated, setIsEliminated] = useState(false);
+  const hasAnswered = useRef<boolean>(false);
+  const hasVoted = useRef<boolean>(false);
+  const hasEliminated = useRef<boolean>(false);
 
   const handleChat = (data: { name: string; text: string }) => {
     setChatList((prev) => [...prev, data]);
   };
 
   const vote = (who: string, target: string) => {
-    if (hasVoted || isEliminated) return;
+    if (hasVoted.current || hasEliminated.current) return;
     getSocket()?.emit(`vote`, { who: who, vote: target });
-    setHasVoted(true);
+    hasVoted.current = true;
   };
 
   const render = () => {
@@ -50,16 +50,16 @@ export default function Chatroom() {
               value={message}
               onChangeText={setMessage}
               placeholder={
-                isEliminated ? "You are eliminated." : "Type your answer…"
+                hasEliminated.current ? "You are eliminated." : "Type your answer…"
               }
-              editable={!isEliminated}
+              editable={!hasEliminated.current}
               autoFocus
               returnKeyType="done"
               onSubmitEditing={() => {
-                if (!isEliminated && !hasAnswered && message.trim()) {
+                if (!hasEliminated.current && !hasAnswered.current && message.trim()) {
                   socket.emit("answer", message.trim());
                   setMessage(``);
-                  setHasAnswered(true);
+                  hasAnswered.current = true;
                 }
               }}
             />
@@ -77,7 +77,7 @@ export default function Chatroom() {
                 <Pressable
                   key={player.name}
                   onPress={() => vote(self.id as string, player.name)}
-                  disabled={hasVoted || isEliminated}
+                  disabled={hasVoted.current || hasEliminated.current}
                 >
                   <Text>{player.name}</Text>
                 </Pressable>
@@ -106,14 +106,15 @@ export default function Chatroom() {
     socket.on("countdown complete", (result) => {
       console.log(`result:`, result);
       if (result === "qa") {
-        if (!hasAnswered && !isEliminated) {
+        if (!hasAnswered.current && !hasEliminated.current) {
+          console.log("out of time!");
           socket.emit("answer", "");
         }
         setChatList([]);
         socket.emit("question");
         setPhase("qa");
-        setHasAnswered(false);
-        setHasVoted(false);
+        hasAnswered.current = false;
+        hasVoted.current = false;
       } else if (result === "vote") {
         socket.emit("vote");
         setPhase("vote");
@@ -121,7 +122,7 @@ export default function Chatroom() {
         setChatList([]);
         socket.emit("question");
         setPhase("qa");
-        setHasVoted(false);
+        hasVoted.current = false;
       }
     });
     socket.on("vote result", (result) => {
@@ -134,7 +135,7 @@ export default function Chatroom() {
     });
     socket.on("eliminated", () => {
       console.log("🔴 You have been eliminated.");
-      setIsEliminated(true);
+      hasEliminated.current = true;
     });
 
     socket.on(`gg`, (resultObj) => {

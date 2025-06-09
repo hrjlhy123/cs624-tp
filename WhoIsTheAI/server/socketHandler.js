@@ -31,6 +31,7 @@ const readyMap = new Map();
 const voteMap = new Map();
 const answers = new Map();
 const nameToSocketId = new Map();
+const socketIdToName = new Map();
 let countdownTimer = null;
 let isGeneratingQuestion = false;
 let answerCount = 0;
@@ -77,6 +78,12 @@ const anonymousNamesPool = [
 const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
 const generateAnonymousNames = (count) =>
   shuffle([...anonymousNamesPool]).slice(0, count);
+
+const emitPlayerList = (io) => {
+  const names = [...socketIdToName.entries()].map(([id, name]) => name);
+  if (!names.includes(AI_ID)) names.unshift(AI_ID);
+  io.emit("players", names);
+};
 
 const usedQuestions = new Set();
 const eliminatedSet = new Set();
@@ -131,7 +138,12 @@ const checkAllAnswered = (io) => {
   const activePlayersCount = Array.from(readyMap.keys()).filter(
     (id) => !eliminatedSet.has(id)
   ).length;
-
+  console.log(
+    `answers.size:`,
+    answers.size,
+    `activePlayersCount:`,
+    activePlayersCount
+  );
   if (answers.size === activePlayersCount) {
     console.log("✅ All players answered:");
     for (const [sid, msg] of answers.entries()) {
@@ -148,22 +160,51 @@ export function setupSocket(io) {
     readyMap.set(socket.id, { ready: false });
     cancelCountdown(io);
 
-    let playerCount = readyMap.size;
-    let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
-    io.emit("players", obfuscatedNames);
+    // let playerCount = readyMap.size;
+    // let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
+    // io.emit("players", obfuscatedNames);
+    const availableNames = anonymousNamesPool.filter(
+      (name) => ![...socketIdToName.values()].includes(name)
+    );
+    const assignedName =
+      availableNames[Math.floor(Math.random() * availableNames.length)];
+    socketIdToName.set(socket.id, assignedName);
+
+    emitPlayerList(io);
 
     socket.on("ready", () => {
       const player = readyMap.get(socket.id);
       if (player) {
         player.ready = true;
-        let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
-        io.emit("players", obfuscatedNames);
-        if (checkAllReady()) {
+        // const currentCount = readyMap.size;
+        // const obfuscatedNames = [
+        //   AI_ID,
+        //   ...generateAnonymousNames(currentCount),
+        // ];
+        // io.emit("players", obfuscatedNames);
+
+        emitPlayerList(io);
+
+        if (!readyMap.has(AI_ID)) {
           readyMap.set(AI_ID, { ready: true });
+        }
+        const humanPlayersReady = Array.from(readyMap.entries()).filter(
+          ([id, p]) => id !== AI_ID && p.ready
+        );
+
+        if (
+          humanPlayersReady.length >= 2 &&
+          humanPlayersReady.length <= 7 &&
+          checkAllReady()
+        ) {
           gameStartTime = Date.now();
           startCountdown(io);
         }
       }
+    });
+
+    socket.on("playerlist", () => {
+      emitPlayerList(io);
     });
 
     socket.on("question", async () => {
@@ -239,10 +280,12 @@ export function setupSocket(io) {
     socket.on("disconnect", () => {
       readyMap.delete(socket.id);
       answers.delete(socket.id);
+      socketIdToName.delete(socket.id);
 
-      let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
-      io.emit("players", obfuscatedNames);
+      // let obfuscatedNames = [AI_ID, ...generateAnonymousNames(playerCount)];
+      // io.emit("players", obfuscatedNames);
 
+      emitPlayerList(io);
       cancelCountdown(io);
       if (checkAllReady()) startCountdown(io);
       isGeneratingQuestion = false;
@@ -262,8 +305,14 @@ export function setupSocket(io) {
 
         voteMap.set(voterId, targetId);
 
-        console.log(`voteMap:`, voteMap, `readyMap:`, readyMap)
-        if (voteMap.size === readyMap.size - 1) { // -1 for AI
+        console.log(`voteMap:`, voteMap, `readyMap:`, readyMap);
+
+        const alivePlayersBeforeElimination = Array.from(
+          readyMap.keys().filter((id) => !eliminatedSet.has(id))
+        );
+
+        if (voteMap.size === alivePlayersBeforeElimination.length - 1) {
+          // -1 for AI
           const voteCounts = new Map();
 
           for (const vote of voteMap.values()) {
@@ -300,18 +349,24 @@ export function setupSocket(io) {
             }
           }
 
-          const alivePlayers = Array.from(
+          const alivePlayersAfterElimination = Array.from(
             readyMap.keys().filter((id) => !eliminatedSet.has(id))
           );
-          const AIAlive = !eliminatedSet.has(AI_ID);
-          console.log("eliminatedSet:", eliminatedSet, "AI_ID:", AI_ID)
 
-          if (!AIAlive) {
+          const AIAlive = !eliminatedSet.has(AI_ID);
+          console.log("eliminatedSet:", eliminatedSet, "AI_ID:", AI_ID);
+
+          if (!AIAlive && alivePlayersAfterElimination.length > 1) {
             console.log(`player win!`);
             cancelCountdown(io);
             startCountdown(io, 10);
             setTimeout(() => {
               io.emit(`gg`, { result: `win` });
+              for (const [id, player] of readyMap.entries()) {
+                if (id !== AI_ID) {
+                  player.ready = false;
+                }
+              }
               const gameDuration = Math.round(
                 (Date.now() - gameStartTime) / 1000
               );
@@ -338,7 +393,7 @@ export function setupSocket(io) {
                 aiWins: stats.aiWins,
               });
             }, 10000);
-          } else if (AIAlive && alivePlayers.length <= 1) {
+          } else if (alivePlayersAfterElimination.length <= 1) {
             console.log(`player lose!`);
             // if (alivePlayers.length === 1) {
             //   console.log(`Only one player left, skipping vote in next round`);
@@ -347,6 +402,11 @@ export function setupSocket(io) {
             startCountdown(io, 10);
             setTimeout(() => {
               io.emit(`gg`, { result: `lose` });
+              for (const [id, player] of readyMap.entries()) {
+                if (id !== AI_ID) {
+                  player.ready = false;
+                }
+              }
               const gameDuration = Math.round(
                 (Date.now() - gameStartTime) / 1000
               );
@@ -378,12 +438,12 @@ export function setupSocket(io) {
               `Game continue: AIAlive:`,
               AIAlive,
               `aliverPlayers.length:`,
-              alivePlayers.length
+              alivePlayersAfterElimination.length
             );
             cancelCountdown(io);
             startCountdown(io, 10, "qa");
           }
-
+          answers.clear();
           voteMap.clear();
         }
       }

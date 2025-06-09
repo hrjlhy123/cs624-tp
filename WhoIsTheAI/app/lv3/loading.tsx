@@ -11,6 +11,7 @@ export default function Loading() {
 
   useEffect(() => {
     const socket = initSocket();
+    socket.emit("playerlist");
 
     socket.on("players", (playerList) => {
       setPlayers(playerList.slice(1));
