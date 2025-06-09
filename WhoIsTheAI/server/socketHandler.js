@@ -80,9 +80,14 @@ const generateAnonymousNames = (count) =>
   shuffle([...anonymousNamesPool]).slice(0, count);
 
 const emitPlayerList = (io) => {
-  const names = [...socketIdToName.entries()].map(([id, name]) => name);
-  if (!names.includes(AI_ID)) names.unshift(AI_ID);
-  io.emit("players", names);
+  const list = Array.from(socketIdToName.entries()).map(([id, name]) => ({
+    name,
+    ready: readyMap.get(id)?.ready || false,
+  }));
+  if (!list.some((p) => p.name === AI_ID)) {
+    list.unshift({ name: AI_ID, ready: true });
+  }
+  io.emit("players", list);
 };
 
 const usedQuestions = new Set();

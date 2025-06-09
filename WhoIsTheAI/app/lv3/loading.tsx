@@ -3,10 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { getSocket, initSocket } from "../../utils/socketRef";
 
+type Player = {
+  name: string;
+  ready: boolean;
+};
+
 export default function Loading() {
   const router = useRouter();
   const playersRef = useRef<string[]>([]);
-  const [players, setPlayers] = useState([]);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
@@ -21,7 +26,7 @@ export default function Loading() {
     socket.on("countdown complete", () =>
       router.push({
         pathname: "/lv4/chatroom",
-        params: { players: JSON.stringify(playersRef.current) }
+        params: { players: JSON.stringify(playersRef.current) },
       })
     );
 
@@ -37,7 +42,9 @@ export default function Loading() {
       <Text>&lt;Loading&gt;</Text>
       <Text>Players:</Text>
       {players.map((p, i) => (
-        <Text key={i}>{p}</Text>
+        <Text key={i}>
+          {p.name} {p.ready && "✔"}
+        </Text>
       ))}
       <Pressable onPress={() => getSocket()?.emit("ready")}>
         <Text>Ready?</Text>
