@@ -1,4 +1,4 @@
-import { useRouter, useLocalSearchParams  } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useState, useEffect } from "react";
 import {
   ImageBackground,
@@ -11,14 +11,12 @@ import {
 
 const contents = {
   win: {
-    title: `Win`,
-    content: `
-        blablabla about win.`,
+    title: `🎉 You Win!`,
+    content: `Congratulations! You outsmarted the AI and proved your human wit. Celebrate your victory and play again to defend your title.`,
   },
   lose: {
-    title: `Lose`,
-    content: `
-        blablabla about lose.`,
+    title: `🤖 AI Wins!`,
+    content: `Oh no! The AI was smarter this time. But don’t worry — analyze the game, try new strategies, and come back stronger!`,
   },
 };
 
@@ -48,11 +46,19 @@ export default function Ending() {
       <View style={styles.overlayWrapper}>
         <View style={styles.overlay}>
           <ScrollView contentContainerStyle={styles.scrollContainer}>
-            <Text style={styles.title}>{content.title}</Text>
+            <Text
+              style={[
+                styles.title,
+                stage === "win" ? styles.winColor : styles.loseColor,
+              ]}
+            >
+              {content.title}
+            </Text>
             <Text style={styles.body}>{content.content}</Text>
           </ScrollView>
+
           <Pressable style={styles.button} onPress={handlePress}>
-            <Text style={styles.buttonText}>Again</Text>
+            <Text style={styles.buttonText}>🔁 Play Again</Text>
           </Pressable>
         </View>
       </View>
@@ -72,38 +78,51 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   overlay: {
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    borderRadius: 16,
+    padding: 24,
     maxWidth: 700,
     width: "90%",
     maxHeight: "85%",
+    alignItems: "center",
   },
   scrollContainer: {
     paddingBottom: 20,
   },
   title: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 12,
-    color: "#fff",
+    fontSize: 26,
+    fontWeight: "bold",
+    marginBottom: 16,
     textAlign: "center",
   },
+  winColor: {
+    color: "#00ffae",
+  },
+  loseColor: {
+    color: "#ff5c5c",
+  },
   body: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: "#fff",
-    whiteSpace: "pre-line",
+    fontSize: 16,
+    lineHeight: 24,
+    color: "#f0f0f0",
+    textAlign: "center",
   },
   button: {
     backgroundColor: "#1e90ff",
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 40,
+    borderRadius: 10,
+    marginTop: 30,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
   },
   buttonText: {
     color: "#fff",
-    fontWeight: "bold",
+    fontWeight: "600",
+    fontSize: 16,
     textAlign: "center",
   },
 });
