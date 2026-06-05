@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   ImageBackground,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  ScrollView,
+  useWindowDimensions,
 } from "react-native";
+import { getGameSettings } from "../../utils/gameSettings";
 import { getSocket, initSocket } from "../../utils/socketRef";
 
 type Player = {
@@ -17,32 +19,74 @@ type Player = {
 
 export default function Loading() {
   const router = useRouter();
-  const playersRef = useRef<string[]>([]);
+  const { width, height } = useWindowDimensions();
+  const settings = getGameSettings();
+  const compact = settings.compactMode || width < 420 || height < 680;
+  const playersRef = useRef<Player[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isReadySent, setIsReadySent] = useState(false);
+  const [connectionError, setConnectionError] = useState("");
 
   useEffect(() => {
     const socket = initSocket();
-    socket.emit("playerlist");
 
-    socket.on("players", (playerList) => {
-      setPlayers(playerList.slice(1));
-      playersRef.current = playerList;
-    });
-    socket.on("countdown", setCountdown);
-    socket.on("countdown complete", () =>
-      router.push({
+    const updateConnected = () => {
+      setIsConnected(socket.connected);
+      setConnectionError("");
+      socket.emit("playerlist");
+    };
+
+    const handleConnectError = () => {
+      setIsConnected(false);
+      setConnectionError("Unable to connect to the game server.");
+    };
+
+    const handlePlayers = (playerList: Player[]) => {
+      const list = Array.isArray(playerList) ? playerList : [];
+      const humanPlayers = list.filter((player) => player.name !== "AI");
+      setPlayers(humanPlayers);
+      playersRef.current = list;
+    };
+
+    const handleCountdownComplete = () => {
+      router.replace({
         pathname: "/lv4/chatroom",
         params: { players: JSON.stringify(playersRef.current) },
-      })
-    );
+      });
+    };
+
+    socket.on("connect", updateConnected);
+    socket.on("connect_error", handleConnectError);
+    socket.on("disconnect", () => setIsConnected(false));
+    socket.on("players", handlePlayers);
+    socket.on("countdown", setCountdown);
+    socket.on("countdown complete", handleCountdownComplete);
+
+    if (socket.connected) {
+      updateConnected();
+    } else {
+      socket.connect();
+      socket.emit("playerlist");
+    }
 
     return () => {
-      socket.off("players");
-      socket.off("countdown");
-      socket.off("countdown complete");
+      socket.off("connect", updateConnected);
+      socket.off("connect_error", handleConnectError);
+      socket.off("disconnect");
+      socket.off("players", handlePlayers);
+      socket.off("countdown", setCountdown);
+      socket.off("countdown complete", handleCountdownComplete);
     };
-  }, []);
+  }, [router]);
+
+  const markReady = () => {
+    const socket = getSocket();
+    if (!socket || !socket.connected || isReadySent) return;
+    socket.emit("ready");
+    setIsReadySent(true);
+  };
 
   return (
     <ImageBackground
@@ -51,24 +95,46 @@ export default function Loading() {
       blurRadius={2}
     >
       <View style={styles.overlayWrapper}>
-        <View style={styles.overlay}>
-          <Text style={styles.title}>&lt; Loading &gt;</Text>
-          <Text style={styles.subtitle}>Players:</Text>
-          <ScrollView style={{ maxHeight: 200, marginBottom: 20 }}>
-            {players.map((p, i) => (
-              <Text key={i} style={styles.player}>
-                {p.name} {p.ready ? "✔" : "❌"}
-              </Text>
-            ))}
+        <View style={[styles.overlay, compact && styles.overlayCompact]}>
+          <Text style={[styles.title, compact && styles.titleCompact]}>
+            Loading
+          </Text>
+          <Text style={styles.statusText}>
+            {isConnected ? "Connected" : "Connecting..."}
+          </Text>
+          {connectionError ? (
+            <Text style={styles.errorText}>{connectionError}</Text>
+          ) : null}
+
+          <Text style={styles.subtitle}>Players</Text>
+          <ScrollView style={styles.playerList}>
+            {players.length ? (
+              players.map((player) => (
+                <Text key={player.name} style={styles.player}>
+                  {player.name} - {player.ready ? "ready" : "waiting"}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>Waiting for players...</Text>
+            )}
           </ScrollView>
 
-          <Pressable style={styles.button} onPress={() => getSocket()?.emit("ready")}>
-            <Text style={styles.buttonText}>I'm Ready</Text>
+          <Pressable
+            style={[
+              styles.button,
+              (!isConnected || isReadySent) && styles.buttonDisabled,
+            ]}
+            onPress={markReady}
+            disabled={!isConnected || isReadySent}
+          >
+            <Text style={styles.buttonText}>
+              {isReadySent ? "Ready" : "I'm Ready"}
+            </Text>
           </Pressable>
 
-          {countdown !== null && (
+          {settings.showCountdown && countdown !== null ? (
             <Text style={styles.countdown}>{countdown}</Text>
-          )}
+          ) : null}
         </View>
       </View>
     </ImageBackground>
@@ -85,19 +151,38 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    padding: 18,
+    backgroundColor: "rgba(0, 0, 0, 0.22)",
   },
   overlay: {
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    borderRadius: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    borderRadius: 12,
     padding: 24,
-    maxWidth: 700,
-    width: "90%",
+    maxWidth: 620,
+    width: "100%",
     alignItems: "center",
   },
+  overlayCompact: {
+    padding: 18,
+  },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "900",
     color: "#fff",
+    marginBottom: 8,
+  },
+  titleCompact: {
+    fontSize: 22,
+  },
+  statusText: {
+    color: "#bde0ff",
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  errorText: {
+    color: "#ffd1d1",
+    fontSize: 14,
+    textAlign: "center",
     marginBottom: 10,
   },
   subtitle: {
@@ -106,33 +191,44 @@ const styles = StyleSheet.create({
     color: "#fff",
     marginBottom: 8,
   },
+  playerList: {
+    width: "100%",
+    maxHeight: 220,
+    marginBottom: 18,
+  },
   player: {
     fontSize: 16,
     color: "#f0f0f0",
     textAlign: "center",
     marginVertical: 4,
   },
+  emptyText: {
+    fontSize: 15,
+    color: "#cfcfcf",
+    textAlign: "center",
+    paddingVertical: 12,
+  },
   button: {
     backgroundColor: "#1e90ff",
     paddingVertical: 12,
     paddingHorizontal: 30,
     borderRadius: 8,
-    marginTop: 20,
-    shadowColor: "#1e90ff",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.8,
-    shadowRadius: 5,
-    elevation: 5,
+    marginTop: 8,
+    minWidth: 180,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   buttonText: {
     color: "#fff",
     fontWeight: "bold",
     fontSize: 16,
+    textAlign: "center",
   },
   countdown: {
     marginTop: 20,
     fontSize: 32,
-    color: "red",
+    color: "#ff5c5c",
     fontWeight: "bold",
   },
 });

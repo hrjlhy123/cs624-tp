@@ -1,155 +1,244 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState, useRef } from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { getGameSettings } from "../../utils/gameSettings";
 import { getSocket } from "../../utils/socketRef";
+
+type ChatMessage = {
+  name: string;
+  text: string;
+};
 
 export default function Chatroom() {
   const router = useRouter();
-  const { players } = useLocalSearchParams();
-  const [question, setQuestion] = useState(``);
-  const [chatList, setChatList] = useState<{ name: string; text: string }[]>([]);
-  const [message, setMessage] = useState(``);
+  const { width, height } = useWindowDimensions();
+  const settings = getGameSettings();
+  const compact = settings.compactMode || width < 420 || height < 720;
+  const [question, setQuestion] = useState("Waiting for the next question...");
+  const [chatList, setChatList] = useState<ChatMessage[]>([]);
+  const chatListRef = useRef<ChatMessage[]>([]);
+  const [voteOptions, setVoteOptions] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [phase, setPhase] = useState<`qa` | `vote`>(`qa`);
+  const [phase, setPhase] = useState<"qa" | "vote">("qa");
+  const [isEliminated, setIsEliminated] = useState(false);
+  const [statusText, setStatusText] = useState("");
   const hasAnswered = useRef(false);
   const hasVoted = useRef(false);
   const hasEliminated = useRef(false);
 
-  const handleChat = (data: { name: string; text: string }) => {
-    setChatList((prev) => [...prev, data]);
+  const clearAnswers = () => {
+    chatListRef.current = [];
+    setChatList([]);
+    setVoteOptions([]);
   };
 
-  const vote = (who: string, target: string) => {
-    if (hasVoted.current || hasEliminated.current) return;
-    getSocket()?.emit(`vote`, { who, vote: target });
-    hasVoted.current = true;
+  const handleChat = (data: ChatMessage) => {
+    if (!data || typeof data.name !== "string") return;
+
+    setChatList((prev) => {
+      const next = [
+        ...prev,
+        {
+          name: data.name,
+          text: typeof data.text === "string" ? data.text : "",
+        },
+      ];
+      chatListRef.current = next;
+      return next;
+    });
   };
 
-  const render = () => {
-    switch (phase) {
-      case `qa`:
-        const socket = getSocket();
-        if (!socket) return null;
-
-        return (
-          <>
-            <Text style={styles.label}>Question:</Text>
-            <Text style={styles.question}>{question}</Text>
-
-            <Text style={styles.label}>Answers:</Text>
-            <ScrollView style={styles.answerList}>
-              {chatList.map((m, i) => (
-                <Text key={i} style={styles.answer}>
-                  {m.name}: {m.text}
-                </Text>
-              ))}
-            </ScrollView>
-
-            <TextInput
-              value={message}
-              onChangeText={setMessage}
-              placeholder={
-                hasEliminated.current ? "You are eliminated." : "Type your answer…"
-              }
-              placeholderTextColor="#aaa"
-              style={styles.input}
-              editable={!hasEliminated.current}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={() => {
-                if (!hasEliminated.current && !hasAnswered.current && message.trim()) {
-                  socket.emit("answer", message.trim());
-                  setMessage(``);
-                  hasAnswered.current = true;
-                }
-              }}
-            />
-          </>
-        );
-
-      case `vote`:
-        const self = getSocket();
-        if (!self) return null;
-
-        return (
-          <>
-            <Text style={styles.label}>Vote:</Text>
-            {chatList.map((player) => (
-              <Pressable
-                key={player.name}
-                onPress={() => vote(self.id as string, player.name)}
-                disabled={hasVoted.current || hasEliminated.current}
-                style={styles.voteButton}
-              >
-                <Text style={styles.voteButtonText}>{player.name}</Text>
-              </Pressable>
-            ))}
-          </>
-        );
+  const submitAnswer = () => {
+    const socket = getSocket();
+    const answer = message.trim();
+    if (!socket || hasEliminated.current || hasAnswered.current || !answer) {
+      return;
     }
+
+    socket.emit("answer", answer);
+    setMessage("");
+    hasAnswered.current = true;
+  };
+
+  const vote = (target: string) => {
+    const socket = getSocket();
+    if (!socket || hasVoted.current || hasEliminated.current) return;
+
+    socket.emit("vote", { vote: target });
+    hasVoted.current = true;
+    setStatusText(`Voted for ${target}`);
+  };
+
+  const renderPhase = () => {
+    if (phase === "qa") {
+      return (
+        <>
+          <Text style={styles.label}>Question</Text>
+          <Text style={[styles.question, compact && styles.questionCompact]}>
+            {question}
+          </Text>
+
+          <Text style={styles.label}>Answers</Text>
+          <ScrollView
+            style={[styles.answerList, compact && styles.answerListCompact]}
+          >
+            {chatList.length ? (
+              chatList.map((chat, index) => (
+                <Text key={`${chat.name}-${index}`} style={styles.answer}>
+                  {chat.name}: {chat.text || "(blank)"}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>Waiting for answers...</Text>
+            )}
+          </ScrollView>
+
+          <TextInput
+            value={message}
+            onChangeText={setMessage}
+            placeholder={
+              hasEliminated.current ? "You are eliminated." : "Type your answer"
+            }
+            placeholderTextColor="#aaa"
+            style={styles.input}
+            editable={!hasEliminated.current && !hasAnswered.current}
+            autoFocus={settings.autoFocusAnswer && !hasEliminated.current}
+            returnKeyType="done"
+            onSubmitEditing={submitAnswer}
+          />
+          <Pressable
+            style={[
+              styles.answerButton,
+              (!message.trim() || hasAnswered.current || hasEliminated.current) &&
+                styles.buttonDisabled,
+            ]}
+            onPress={submitAnswer}
+            disabled={
+              !message.trim() || hasAnswered.current || hasEliminated.current
+            }
+          >
+            <Text style={styles.answerButtonText}>
+              {hasAnswered.current ? "Submitted" : "Submit"}
+            </Text>
+          </Pressable>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Text style={styles.label}>Vote</Text>
+        <View style={styles.voteList}>
+          {voteOptions.length ? (
+            voteOptions.map((player) => (
+              <Pressable
+                key={player}
+                onPress={() => vote(player)}
+                disabled={hasVoted.current || hasEliminated.current}
+                style={[
+                  styles.voteButton,
+                  (hasVoted.current || hasEliminated.current) &&
+                    styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.voteButtonText}>{player}</Text>
+              </Pressable>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No answers to vote on.</Text>
+          )}
+        </View>
+      </>
+    );
   };
 
   useEffect(() => {
     const socket = getSocket();
-    if (!socket) return;
+    if (!socket) {
+      setStatusText("Game connection is missing. Return to loading first.");
+      return;
+    }
+
+    const handleQuestion = (nextQuestion: string) => {
+      if (typeof nextQuestion === "string" && nextQuestion.trim()) {
+        setQuestion(nextQuestion);
+      }
+    };
+
+    const handleCountdownComplete = (result: string | null) => {
+      if (result === "end") {
+        return;
+      }
+
+      if (result === "vote") {
+        const options = Array.from(
+          new Set(chatListRef.current.map((chat) => chat.name))
+        );
+        setVoteOptions(options);
+        socket.emit("vote");
+        setPhase("vote");
+        setStatusText("");
+        return;
+      }
+
+      clearAnswers();
+      socket.emit("question");
+      setPhase("qa");
+      setStatusText("");
+      hasAnswered.current = false;
+      hasVoted.current = false;
+    };
+
+    const handleVoteResult = () => {
+      setStatusText("Vote counted");
+    };
+
+    const handleEliminated = () => {
+      hasEliminated.current = true;
+      setIsEliminated(true);
+      setStatusText("You were eliminated.");
+    };
+
+    const handleGameOver = (resultObj: { result?: string }) => {
+      router.replace({
+        pathname: "/lv3/ending",
+        params: { result: resultObj?.result === "lose" ? "lose" : "win" },
+      });
+    };
 
     socket.emit("question");
     setPhase("qa");
 
-    socket.on("question", setQuestion);
+    socket.on("question", handleQuestion);
     socket.on("answer", handleChat);
     socket.on("countdown", setCountdown);
-    socket.on("countdown complete", (result) => {
-      if (result === "qa") {
-        if (!hasAnswered.current && !hasEliminated.current) {
-          socket.emit("answer", "");
-        }
-        setChatList([]);
-        socket.emit("question");
-        setPhase("qa");
-        hasAnswered.current = false;
-        hasVoted.current = false;
-      } else if (result === "vote") {
-        socket.emit("vote");
-        setPhase("vote");
-      } else {
-        setChatList([]);
-        socket.emit("question");
-        setPhase("qa");
-        hasVoted.current = false;
-      }
-    });
-
-    socket.on("vote result", () => {});
-    socket.on("eliminated", () => {
-      hasEliminated.current = true;
-    });
-
-    socket.on(`gg`, (resultObj) => {
-      router.push({
-        pathname: `/lv3/ending`,
-        params: { result: resultObj.result },
-      });
-    });
+    socket.on("countdown complete", handleCountdownComplete);
+    socket.on("vote result", handleVoteResult);
+    socket.on("eliminated", handleEliminated);
+    socket.on("gg", handleGameOver);
 
     return () => {
-      socket.off("question", setQuestion);
+      socket.off("question", handleQuestion);
       socket.off("answer", handleChat);
       socket.off("countdown", setCountdown);
-      socket.off("countdown complete");
-      socket.off("vote result");
-      socket.off("eliminated");
-      socket.off(`gg`);
+      socket.off("countdown complete", handleCountdownComplete);
+      socket.off("vote result", handleVoteResult);
+      socket.off("eliminated", handleEliminated);
+      socket.off("gg", handleGameOver);
     };
-  }, []);
+  }, [router]);
 
   return (
     <ImageBackground
@@ -157,13 +246,30 @@ export default function Chatroom() {
       style={styles.background}
       blurRadius={2}
     >
-      <View style={styles.overlay}>
-        <Text style={styles.title}>💬 ChatRoom</Text>
-        {countdown !== null && (
-          <Text style={styles.countdown}>{countdown}</Text>
-        )}
-        {render()}
-      </View>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.overlayWrapper,
+            compact && styles.overlayWrapperCompact,
+          ]}
+        >
+          <View style={[styles.overlay, compact && styles.overlayCompact]}>
+            <Text style={[styles.title, compact && styles.titleCompact]}>
+              Chat Room
+            </Text>
+            {settings.showCountdown && countdown !== null ? (
+              <Text style={styles.countdown}>{countdown}</Text>
+            ) : null}
+            {isEliminated || statusText ? (
+              <Text style={styles.statusText}>{statusText}</Text>
+            ) : null}
+            {renderPhase()}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ImageBackground>
   );
 }
@@ -174,28 +280,53 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  overlay: {
+  keyboardView: {
     flex: 1,
-    padding: 24,
+  },
+  overlayWrapper: {
+    flexGrow: 1,
+    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
+    padding: 20,
+    backgroundColor: "rgba(0,0,0,0.58)",
+  },
+  overlayWrapperCompact: {
+    padding: 12,
+  },
+  overlay: {
+    width: "100%",
+    maxWidth: 720,
+    alignItems: "center",
+  },
+  overlayCompact: {
+    maxWidth: 520,
   },
   title: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: "bold",
     color: "#fff",
-    marginBottom: 10,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  titleCompact: {
+    fontSize: 22,
   },
   countdown: {
-    fontSize: 36,
-    color: "red",
+    fontSize: 34,
+    color: "#ff5c5c",
     fontWeight: "bold",
-    marginBottom: 20,
+    marginBottom: 12,
+  },
+  statusText: {
+    color: "#d6ecff",
+    fontSize: 14,
+    marginBottom: 10,
+    textAlign: "center",
   },
   label: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#00d1ff",
+    color: "#54d8ff",
     marginBottom: 6,
     marginTop: 10,
   },
@@ -205,48 +336,79 @@ const styles = StyleSheet.create({
     color: "#fff",
     textAlign: "center",
     marginBottom: 12,
+    lineHeight: 28,
+  },
+  questionCompact: {
+    fontSize: 18,
+    lineHeight: 25,
   },
   answerList: {
-    maxHeight: 160,
+    maxHeight: 220,
     width: "100%",
     paddingHorizontal: 10,
-    marginBottom: 20,
+    marginBottom: 18,
+  },
+  answerListCompact: {
+    maxHeight: 150,
   },
   answer: {
     fontSize: 15,
     color: "#eee",
     textAlign: "center",
-    paddingVertical: 3,
+    paddingVertical: 4,
+  },
+  emptyText: {
+    color: "#d8d8d8",
+    fontSize: 15,
+    textAlign: "center",
+    paddingVertical: 10,
   },
   input: {
-    width: "80%",
-    maxWidth: 500,
+    width: "100%",
+    maxWidth: 520,
     backgroundColor: "#1f1f1f",
     color: "#fff",
-    paddingVertical: 10,
+    paddingVertical: 11,
     paddingHorizontal: 15,
-    borderRadius: 10,
+    borderRadius: 8,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: "#444",
-    marginBottom: 12,
+    borderColor: "#555",
+    marginBottom: 10,
     alignSelf: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+  },
+  answerButton: {
+    width: "100%",
+    maxWidth: 520,
+    backgroundColor: "#1e90ff",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+  },
+  answerButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  voteList: {
+    width: "100%",
+    maxWidth: 420,
+    gap: 8,
   },
   voteButton: {
     backgroundColor: "#1e90ff",
-    paddingVertical: 10,
-    paddingHorizontal: 30,
+    paddingVertical: 11,
+    paddingHorizontal: 24,
     borderRadius: 8,
-    marginVertical: 6,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   voteButtonText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+    textAlign: "center",
   },
 });

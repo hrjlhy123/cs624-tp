@@ -1,67 +1,53 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ImageBackground,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
 
 const contents = {
   policy: {
-    title: `User Policy`,
-    content: `
-Overview:
-As part of the “Who is the AI?” mobile app, this page informs users about privacy, data usage, and gameplay expectations.
+    title: "User Policy",
+    content: `Overview
+Who is the AI? uses a real-time socket connection so players can answer, vote, and see game progress together.
 
-Purpose:
-This page explains how your data is collected, stored, used, and protected to build user trust.
+Data Use
+Gameplay statistics may be saved for the dashboard, including total games, win counts, and average game time. Chat answers are used during the live round.
 
-Design Considerations:
-- Scrollable Content for long policies
-- Sections like Introduction, Data Collection, Security
-- Mobile-friendly font and contrast
-- Contact info for questions
-
-Contact:
-support@whoistheai.com
-    `,
-    button: `Agree`,
+Fair Play
+Do not spam, impersonate others, or share harmful content. The game works best when everyone answers honestly enough to keep the deduction fair.`,
+    button: "Agree",
   },
   rules: {
-    title: `Game Rules`,
-    content: `
-Purpose:
-The Rules Page clearly outlines the gameplay rules to ensure users understand how the game works and what behavior is expected. This reduces confusion and enhances fair play.
-
-Design Considerations:
-- Numbered List Format:
-Presenting rules as a numbered list improves clarity and helps users follow the sequence of gameplay steps.
-
-- Concise Wording:
-Each rule is short and straightforward, avoiding jargon to be accessible to a broad user base.
-
-- ScrollView:
-A scrollable container ensures all rules are viewable regardless of device screen size.
-
-- Consistent Styling:
-Typography and spacing match the Policy Page for UI consistency, supporting a professional app look and feel.
-
-- Focus on Fair Play:
-Including rules against cheating and spam helps maintain a respectful and enjoyable gaming environment.
-
-Technology Stack Related to UI Design:
-- React Native
-- OpenAI API
-- MongoDB
-- WebSocket
-    `,
-    button: `Next`,
+    title: "Game Rules",
+    content: `1. Each game needs at least two human players plus one hidden AI.
+2. All active players answer the same question each round.
+3. After the answers appear, vote for the player you think is the AI.
+4. The top-voted player is eliminated.
+5. Humans win when the AI is eliminated.
+6. The AI wins if it outlasts the humans.`,
+    button: "Find Players",
   },
 };
 
 export default function Intro() {
   const [stage, setStage] = useState("policy");
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  const compact = width < 420 || height < 680;
 
   const handlePress = () => {
-    if (stage === "policy") setStage("rules");
-    else if (stage === "rules") router.push("/lv3/loading");
+    if (stage === "policy") {
+      setStage("rules");
+      return;
+    }
+
+    router.replace("/lv3/loading");
   };
 
   const content = contents[stage];
@@ -73,9 +59,11 @@ export default function Intro() {
       blurRadius={2}
     >
       <View style={styles.overlayWrapper}>
-        <View style={styles.overlay}>
+        <View style={[styles.overlay, compact && styles.overlayCompact]}>
           <ScrollView contentContainerStyle={styles.scrollContainer}>
-            <Text style={styles.title}>{content.title}</Text>
+            <Text style={[styles.title, compact && styles.titleCompact]}>
+              {content.title}
+            </Text>
             <Text style={styles.body}>{content.content}</Text>
           </ScrollView>
           <Pressable style={styles.button} onPress={handlePress}>
@@ -97,40 +85,49 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    padding: 18,
+    backgroundColor: "rgba(0, 0, 0, 0.22)",
   },
   overlay: {
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    backgroundColor: "rgba(0, 0, 0, 0.68)",
     borderRadius: 12,
     padding: 20,
-    maxWidth: 700,
-    width: "90%",
-    maxHeight: "85%",
+    maxWidth: 660,
+    width: "100%",
+    maxHeight: "86%",
+  },
+  overlayCompact: {
+    padding: 16,
+    maxHeight: "90%",
   },
   scrollContainer: {
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   title: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: "700",
-    marginBottom: 12,
+    marginBottom: 14,
     color: "#fff",
     textAlign: "center",
   },
+  titleCompact: {
+    fontSize: 19,
+  },
   body: {
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 23,
     color: "#fff",
-    whiteSpace: "pre-line",
   },
   button: {
     backgroundColor: "#1e90ff",
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 8,
-    marginTop: 20,
+    marginTop: 16,
   },
   buttonText: {
     color: "#fff",
     fontWeight: "bold",
     textAlign: "center",
+    fontSize: 16,
   },
 });

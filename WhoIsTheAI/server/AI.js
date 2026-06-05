@@ -1,18 +1,33 @@
-import 'dotenv/config';
+import "dotenv/config";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+let openai = null;
+
+function getOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("OPENAI_API_KEY is missing. Using fallback AI answer.");
+    return null;
+  }
+
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+
+  return openai;
+}
 
 export async function GPT(model, base64Image, message = null) {
-  console.log(`message:`, message)
+  const client = getOpenAIClient();
+  if (!client) return null;
+
   try {
-    const response = await openai.chat.completions.create({
-      model: model,
+    const response = await client.chat.completions.create({
+      model,
       messages: [
         {
-          role: `user`,
+          role: "user",
           content: [
             message && {
               type: "text",
@@ -28,11 +43,10 @@ export async function GPT(model, base64Image, message = null) {
         },
       ],
     });
-    const result_GPT = response.choices[0];
-    console.log(`result_GPT: ${JSON.stringify(result_GPT)}`);
-    return result_GPT;
+
+    return response.choices[0];
   } catch (error) {
-    console.log(`Failed to process GPT: ${error}`);
+    console.error("Failed to process GPT:", error);
+    return null;
   }
 }
-

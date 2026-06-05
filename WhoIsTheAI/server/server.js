@@ -2,8 +2,8 @@ import cors from "cors";
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { setupSocket } from "./socketHandler.js";
 import { getLatestGameStats } from "./dbOperation.js";
+import { setupSocket } from "./socketHandler.js";
 
 const app = express();
 app.use(cors());
